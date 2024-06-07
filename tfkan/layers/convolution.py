@@ -9,17 +9,20 @@ from typing import Tuple, List, Any, Union, Callable
 from abc import ABC, abstractmethod
 
 
-class ConvolutionKAN(Layer, LayerKAN):
+@tf.keras.saving.register_keras_serializable("tfkan")
+class ConvolutionKAN(tf.keras.layers.Layer, LayerKAN):
     @abstractmethod
-    def __init__(self, 
+    def __init__(
+        self,
         rank: int,
         filters: int,
         kernel_size: Any,
         strides: Any,
-        padding: str = 'VALID',
+        padding: str = "VALID",
         use_bias: bool = True,
         kan_kwargs: dict = {},
-        **kwargs):
+        **kwargs,
+    ):
         """
         Parameters
         ----------
@@ -46,23 +49,29 @@ class ConvolutionKAN(Layer, LayerKAN):
             try:
                 assert len(kernel_size) == self.rank
             except AssertionError:
-                raise ValueError(f"expected kernel_size to be of length {self.rank}, found {kernel_size} of length {len(kernel_size)}")
+                raise ValueError(
+                    f"expected kernel_size to be of length {self.rank}, found {kernel_size} of length {len(kernel_size)}"
+                )
         if isinstance(strides, (list, tuple)):
             try:
                 assert len(strides) == self.rank
             except AssertionError:
-                raise ValueError(f"expected strides to be of length {self.rank}, found {strides} of length {len(strides)}")
-        
+                raise ValueError(
+                    f"expected strides to be of length {self.rank}, found {strides} of length {len(strides)}"
+                )
+
         self.kernel_size = kernel_size
         self.strides = strides
 
         # check padding
         try:
-            assert padding.upper() in ['VALID', 'SAME']
+            assert padding.upper() in ["VALID", "SAME"]
             self.padding = padding.upper()
         except AssertionError:
-            raise ValueError(f"expected padding to be 'VALID' or 'SAME', found {padding}")
-        
+            raise ValueError(
+                f"expected padding to be 'VALID' or 'SAME', found {padding}"
+            )
+
         self.use_bias = use_bias
         self.kan_kwargs = kan_kwargs
 
@@ -74,19 +83,16 @@ class ConvolutionKAN(Layer, LayerKAN):
             in_channels = input_shape[-1]
 
         self._in_channels = in_channels
-        
+
         # process kernel_size and strides
         if isinstance(self.kernel_size, int):
             self.kernel_size = tuple([self.kernel_size] * self.rank)
         if isinstance(self.strides, int):
             self.strides = tuple([self.strides] * self.rank)
-        
+
         # create dnese layer for convolution kernel
         self.kernel = DenseKAN(
-            units=self.filters,
-            dtype=self.dtype,
-            use_bias=False,
-            **self.kan_kwargs
+            units=self.filters, dtype=self.dtype, use_bias=False, **self.kan_kwargs
         )
         self._in_size = int(np.prod(self.kernel_size) * in_channels)
         self.kernel.build(self._in_size)
@@ -95,16 +101,13 @@ class ConvolutionKAN(Layer, LayerKAN):
         # create bias if needed
         if self.use_bias:
             self.bias = self.add_weight(
-                name='bias',
-                shape=(self.filters,),
-                initializer='zeros',
-                trainable=True
+                name="bias", shape=(self.filters,), initializer="zeros", trainable=True
             )
         else:
             self.bias = None
 
         self.built = True
-    
+
     def call(self, inputs, *args, **kwargs):
         # check the inputs, and reshape inputs into 2D tensor (-1, in_channels)
         inputs, orig_shape = self._check_and_reshape_inputs(inputs)
@@ -121,28 +124,42 @@ class ConvolutionKAN(Layer, LayerKAN):
             output += self.bias
 
         return output
-    
+
     @abstractmethod
     def _check_and_reshape_inputs(self, inputs):
         raise NotImplementedError
 
-    def update_grid_from_samples(self, 
-        inputs: tf.Tensor, 
-        **kwargs
-    ):
+    def update_grid_from_samples(self, inputs: tf.Tensor, **kwargs):
         inputs, _ = self._check_and_reshape_inputs(inputs)
         self.kernel.update_grid_from_samples(inputs, **kwargs)
-    
-    def extend_grid_from_samples(self, 
-        inputs: tf.Tensor, 
-        extend_grid_size: int,
-        **kwargs
+
+    def extend_grid_from_samples(
+        self, inputs: tf.Tensor, extend_grid_size: int, **kwargs
     ):
         inputs, _ = self._check_and_reshape_inputs(inputs)
         self.kernel.extend_grid_from_samples(inputs, extend_grid_size, **kwargs)
         self.grid_size = self.kernel.grid_size
-    
 
+    def get_config(self):
+        config = super(DenseKAN, self).get_config()
+        config.update(
+            {
+                "rank": self.rank,
+                "filters": self.filters,
+                "kernel_size": self.kernel_size,
+                "padding": self.padding,
+                "use_bias": self.use_bias,
+                "kan_kwargs": self.kan_kwargs,
+            }
+        )
+        return config
+
+    @classmethod
+    def from_config(cls, config):
+        return cls(**config)
+
+
+@tf.keras.saving.register_keras_serializable("tfkan")
 class Conv2DKAN(ConvolutionKAN):
     """
     2D convolution layer using KAN kernel.
@@ -159,15 +176,27 @@ class Conv2DKAN(ConvolutionKAN):
     >>> print(y.shape)
     (4, 26, 26, 8)
     """
-    def __init__(self, 
+
+    def __init__(
+        self,
         filters: int,
         kernel_size: Any,
-        strides: Any=(1, 1),
-        padding: str = 'VALID',
+        strides: Any = (1, 1),
+        padding: str = "VALID",
         use_bias: bool = True,
         kan_kwargs: dict = {},
-        **kwargs):
-        super(Conv2DKAN, self).__init__(rank=2, filters=filters, kernel_size=kernel_size, strides=strides, padding=padding, use_bias=use_bias, kan_kwargs=kan_kwargs, **kwargs)
+        **kwargs,
+    ):
+        super(Conv2DKAN, self).__init__(
+            rank=2,
+            filters=filters,
+            kernel_size=kernel_size,
+            strides=strides,
+            padding=padding,
+            use_bias=use_bias,
+            kan_kwargs=kan_kwargs,
+            **kwargs,
+        )
 
     def _check_and_reshape_inputs(self, inputs):
         shape = tf.shape(inputs)
@@ -175,13 +204,17 @@ class Conv2DKAN(ConvolutionKAN):
         try:
             assert ndim == 4
         except AssertionError:
-            raise ValueError(f"expected min_ndim=4, found ndim={ndim}. Full shape received: {shape}")
+            raise ValueError(
+                f"expected min_ndim=4, found ndim={ndim}. Full shape received: {shape}"
+            )
 
         try:
             assert inputs.shape[-1] == self._in_channels
         except AssertionError:
-            raise ValueError(f"expected last dimension of inputs to be {self._in_channels}, found {shape[-1]}")
-        
+            raise ValueError(
+                f"expected last dimension of inputs to be {self._in_channels}, found {shape[-1]}"
+            )
+
         # reshape the inputs into patches
         # so we can transform the convolution into a dense layer
         patches = tf.image.extract_patches(
@@ -189,7 +222,7 @@ class Conv2DKAN(ConvolutionKAN):
             sizes=[1, *self.kernel_size, 1],
             strides=[1, *self.strides, 1],
             rates=[1, 1, 1, 1],
-            padding=self.padding
+            padding=self.padding,
         )
         orig_shape = tf.shape(patches)[:-1]
         # reshape the patches into (-1, in_size)
@@ -197,7 +230,8 @@ class Conv2DKAN(ConvolutionKAN):
 
         return inputs, orig_shape
 
-  
+
+@tf.keras.saving.register_keras_serializable("tfkan")
 class Conv3DKAN(ConvolutionKAN):
     """
     3D convolution layer using KAN kernel.
@@ -215,44 +249,61 @@ class Conv3DKAN(ConvolutionKAN):
     >>> print(y.shape)
     (4, 32, 14, 14, 8)
     """
-    def __init__(self, 
+
+    def __init__(
+        self,
         filters: int,
         kernel_size: Any,
-        strides: Any=(1, 1, 1),
-        padding: str = 'VALID',
+        strides: Any = (1, 1, 1),
+        padding: str = "VALID",
         use_bias: bool = True,
         kan_kwargs: dict = {},
-        **kwargs):
-        super(Conv3DKAN, self).__init__(rank=3, filters=filters, kernel_size=kernel_size, strides=strides, padding=padding, use_bias=use_bias, kan_kwargs=kan_kwargs, **kwargs)
-    
+        **kwargs,
+    ):
+        super(Conv3DKAN, self).__init__(
+            rank=3,
+            filters=filters,
+            kernel_size=kernel_size,
+            strides=strides,
+            padding=padding,
+            use_bias=use_bias,
+            kan_kwargs=kan_kwargs,
+            **kwargs,
+        )
+
     def _check_and_reshape_inputs(self, inputs):
         shape = tf.shape(inputs)
         ndim = len(shape)
         try:
             assert ndim == 5
         except AssertionError:
-            raise ValueError(f"expected min_ndim=5, found ndim={ndim}. Full shape received: {shape}")
+            raise ValueError(
+                f"expected min_ndim=5, found ndim={ndim}. Full shape received: {shape}"
+            )
 
         try:
             assert inputs.shape[-1] == self._in_channels
         except AssertionError:
-            raise ValueError(f"expected last dimension of inputs to be {self._in_channels}, found {shape[-1]}")
-        
+            raise ValueError(
+                f"expected last dimension of inputs to be {self._in_channels}, found {shape[-1]}"
+            )
+
         # reshape the inputs into patches
         # so we can transform the convolution into a dense layer
         patches = tf.extract_volume_patches(
             inputs,
             ksizes=[1, *self.kernel_size, 1],
             strides=[1, *self.strides, 1],
-            padding=self.padding
+            padding=self.padding,
         )
         orig_shape = tf.shape(patches)[:-1]
         # reshape the patches into (-1, in_size)
         inputs = tf.reshape(patches, (-1, self._in_size))
 
         return inputs, orig_shape
-    
 
+
+@tf.keras.saving.register_keras_serializable("tfkan")
 class Conv1DKAN(ConvolutionKAN):
     """
     1D convolution layer using KAN kernel.
@@ -270,15 +321,27 @@ class Conv1DKAN(ConvolutionKAN):
     >>> print(y.shape)
     (4, 16, 8)
     """
-    def __init__(self, 
+
+    def __init__(
+        self,
         filters: int,
         kernel_size: Any,
-        strides: Any=1,
-        padding: str = 'VALID',
+        strides: Any = 1,
+        padding: str = "VALID",
         use_bias: bool = True,
         kan_kwargs: dict = {},
-        **kwargs):
-        super(Conv1DKAN, self).__init__(rank=1, filters=filters, kernel_size=kernel_size, strides=strides, padding=padding, use_bias=use_bias, kan_kwargs=kan_kwargs, **kwargs)
+        **kwargs,
+    ):
+        super(Conv1DKAN, self).__init__(
+            rank=1,
+            filters=filters,
+            kernel_size=kernel_size,
+            strides=strides,
+            padding=padding,
+            use_bias=use_bias,
+            kan_kwargs=kan_kwargs,
+            **kwargs,
+        )
 
     def _check_and_reshape_inputs(self, inputs):
         shape = tf.shape(inputs)
@@ -286,21 +349,25 @@ class Conv1DKAN(ConvolutionKAN):
         try:
             assert ndim == 3
         except AssertionError:
-            raise ValueError(f"expected min_ndim=3, found ndim={ndim}. Full shape received: {shape}")
+            raise ValueError(
+                f"expected min_ndim=3, found ndim={ndim}. Full shape received: {shape}"
+            )
 
         try:
             assert inputs.shape[-1] == self._in_channels
         except AssertionError:
-            raise ValueError(f"expected last dimension of inputs to be {self._in_channels}, found {shape[-1]}")
-        
+            raise ValueError(
+                f"expected last dimension of inputs to be {self._in_channels}, found {shape[-1]}"
+            )
+
         # reshape the inputs into patches
         # so we can transform the convolution into a dense layer
         patches = tf.signal.frame(
             inputs,
             frame_length=self.kernel_size[0],
             frame_step=self.strides[0],
-            pad_end=True if self.padding == 'SAME' else False,
-            axis=1
+            pad_end=True if self.padding == "SAME" else False,
+            axis=1,
         )
         orig_shape = tf.shape(patches)[:-2]
         # reshape the patches into (-1, in_size)
