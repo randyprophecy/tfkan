@@ -5,14 +5,15 @@ from ..ops.spline import fit_spline_coef
 from ..ops.grid import build_adaptive_grid
 from typing import Tuple, List, Any, Union, Callable
 
+
 @tf.keras.saving.register_keras_serializable("tfkan")
 class DenseKAN(Layer, LayerKAN):
     """
     DenseKAN Layer: A Keras layer implementing a spline-based dense layer with adaptive grid updates.
-    
+
     The layer leverages B-spline basis functions to approximate non-linear functions over the input space.
     Grid updates and extensions are performed to adaptively refine the spline representation during training.
-    
+
     Arguments:
         units (int): Number of output units.
         use_bias (bool): Whether to use a bias term. Default is True.
@@ -27,15 +28,15 @@ class DenseKAN(Layer, LayerKAN):
         l2_reg (float): L2 regularization parameter for spline coefficient fitting. Default is 0.01.
         fast (bool): Whether to use the fast version of the least squares solver. Default is False.
         **kwargs: Additional keyword arguments.
-    
+
     References:
         - Zhou, Z. P., et al. "Spline-Based Activation Function in Neural Networks."
-    
+
     Example:
         >>> layer = DenseKAN(units=10, grid_size=5, spline_order=3)
         >>> output = layer(inputs)
     """
-    
+
     def __init__(
         self,
         units: int,
@@ -76,7 +77,7 @@ class DenseKAN(Layer, LayerKAN):
 
         Arguments:
             input_shape (Any): Shape of the input tensor.
-        
+
         Example:
             >>> layer.build((None, 10))
         """
@@ -154,7 +155,7 @@ class DenseKAN(Layer, LayerKAN):
 
         Returns:
             tf.Tensor: Output tensor after applying spline-based transformation and optional bias.
-        
+
         Example:
             >>> output = layer.call(inputs)
         """
@@ -186,7 +187,7 @@ class DenseKAN(Layer, LayerKAN):
 
         Returns:
             Tuple[tf.Tensor, tf.Tensor]: Reshaped inputs and original shape.
-        
+
         Example:
             >>> reshaped_inputs, orig_shape = layer._check_and_reshape_inputs(inputs)
         """
@@ -204,6 +205,7 @@ class DenseKAN(Layer, LayerKAN):
         inputs = tf.reshape(inputs, (-1, self.in_size))
         return inputs, orig_shape
 
+    @tf.function
     def update_grid_from_samples(
         self, inputs: tf.Tensor = None, margin: float = 0.01, grid_eps: float = 0.01
     ):
@@ -216,14 +218,15 @@ class DenseKAN(Layer, LayerKAN):
             inputs (tf.Tensor): Input tensor. If None, uses stored inputs.
             margin (float): Margin for grid update. Default is 0.01.
             grid_eps (float): Grid epsilon for adaptive grid building. Default is 0.01.
-        
+
         Example:
             >>> layer.update_grid_from_samples(inputs)
-        
+
         Formula:
             The grid update involves recalculating the grid points based on the current input data:
             grid_new = build_adaptive_grid(inputs, grid_size, spline_order, grid_eps, margin, dtype)
         """
+        tf.print("Updating grid")
         if inputs is None:
             inputs = self._current_inputs  # Use stored inputs
         inputs, _ = self._check_and_reshape_inputs(inputs)
@@ -231,10 +234,13 @@ class DenseKAN(Layer, LayerKAN):
         grid = build_adaptive_grid(
             inputs, self.grid_size, self.spline_order, grid_eps, margin, self.dtype
         )
-        updated_kernel = fit_spline_coef(inputs, spline_out, grid, self.spline_order, self.l2_reg, self.fast)
+        updated_kernel = fit_spline_coef(
+            inputs, spline_out, grid, self.spline_order, self.l2_reg, self.fast
+        )
         self.grid.assign(grid)
         self.spline_kernel.assign(updated_kernel)
 
+    @tf.function
     def extend_grid_from_samples(
         self,
         inputs: tf.Tensor = None,
@@ -254,10 +260,10 @@ class DenseKAN(Layer, LayerKAN):
             margin (float): Margin for grid extension. Default is 0.01.
             grid_eps (float): Grid epsilon for adaptive grid building. Default is 0.01.
             **kwargs: Additional keyword arguments.
-        
+
         Example:
             >>> layer.extend_grid_from_samples(inputs)
-        
+
         Formula:
             The grid extension involves adding new grid points and recalculating the spline coefficients:
             grid_new = build_adaptive_grid(inputs, extend_grid_size, spline_order, grid_eps, margin, dtype)
@@ -281,8 +287,11 @@ class DenseKAN(Layer, LayerKAN):
         updated_kernel = fit_spline_coef(
             inputs, spline_out, grid, self.spline_order, l2_reg, fast
         )
-        self.grid.assign(grid)
+
+        # Resize existing variables
+        self.grid.assign(tf.cast(grid, dtype=self.dtype))
         self.spline_kernel.assign(updated_kernel)
+
         self.grid_size = extend_grid_size
 
     def get_config(self):
@@ -291,7 +300,7 @@ class DenseKAN(Layer, LayerKAN):
 
         Returns:
             dict: Configuration dictionary.
-        
+
         Example:
             >>> config = layer.get_config()
         """
@@ -327,7 +336,7 @@ class DenseKAN(Layer, LayerKAN):
 
         Returns:
             DenseKAN: A new instance of DenseKAN.
-        
+
         Example:
             >>> layer = DenseKAN.from_config(config)
         """
